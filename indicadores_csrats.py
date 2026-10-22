@@ -225,6 +225,31 @@ COLUNAS = [
 ]
 
 
+def calcular(jogadores, n_embaralhamentos=2000, min_partidas=12, semente=42):
+    """Preenche j["ind"] e j["perfil"] de cada jogador; devolve o contexto da liga."""
+    todas = [v for j in jogadores for v in j["partidas"]]
+    ctx = {
+        "media_liga": statistics.fmean(todas),
+        "mediana_liga": statistics.median(todas),
+        "k": constante_encolhimento(jogadores, min_partidas),
+        "min_partidas": min_partidas,
+    }
+    rng = random.Random(semente)
+    for j in jogadores:
+        j["ind"] = indicadores(j["partidas"], ctx, n_embaralhamentos, rng)
+
+    for teste in ("tendencia", "autocorr", "sequencias", "cusum"):
+        qs = benjamini_hochberg([j["ind"].get(f"{teste}_p") for j in jogadores])
+        for j, q in zip(jogadores, qs):
+            j["ind"][f"{teste}_q"] = q
+
+    cvs = [j["ind"]["cv"] for j in jogadores if j["ind"].get("cv") is not None and len(j["partidas"]) >= 15]
+    ctx["cv_q1"], ctx["cv_q3"] = percentil(cvs, 0.25), percentil(cvs, 0.75)
+    for j in jogadores:
+        j["perfil"] = perfis(j["ind"], ctx["cv_q1"], ctx["cv_q3"])
+    return ctx
+
+
 def main():
     parser = argparse.ArgumentParser(description="Indicadores por jogador (CSRats).")
     parser.add_argument("--csv", type=Path, default=CSV_PADRAO)
@@ -236,26 +261,8 @@ def main():
     args = parser.parse_args()
 
     jogadores = ler_jogadores(args.csv)
-    todas = [v for j in jogadores for v in j["partidas"]]
-    ctx = {
-        "media_liga": statistics.fmean(todas),
-        "mediana_liga": statistics.median(todas),
-        "k": constante_encolhimento(jogadores, args.min_partidas),
-        "min_partidas": args.min_partidas,
-    }
-    rng = random.Random(args.semente)
-    for j in jogadores:
-        j["ind"] = indicadores(j["partidas"], ctx, args.embaralhamentos, rng)
-
-    for teste in ("tendencia", "autocorr", "sequencias", "cusum"):
-        qs = benjamini_hochberg([j["ind"].get(f"{teste}_p") for j in jogadores])
-        for j, q in zip(jogadores, qs):
-            j["ind"][f"{teste}_q"] = q
-
-    cvs = [j["ind"]["cv"] for j in jogadores if j["ind"].get("cv") is not None and len(j["partidas"]) >= 15]
-    cv_q1, cv_q3 = percentil(cvs, 0.25), percentil(cvs, 0.75)
-    for j in jogadores:
-        j["perfil"] = perfis(j["ind"], cv_q1, cv_q3)
+    ctx = calcular(jogadores, args.embaralhamentos, args.min_partidas, args.semente)
+    cv_q1, cv_q3 = ctx["cv_q1"], ctx["cv_q3"]
 
     print(f"Liga: média {ctx['media_liga']:.1f}, mediana {ctx['mediana_liga']:.1f}, "
           f"k do encolhimento = {ctx['k']:.1f} partidas")

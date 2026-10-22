@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSRats — Painel</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--ln:#e3e6ea;--a:#2563eb;--b:#ea580c;--heat:37,99,235}
+@media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1b1e23;--tx:#e6e8eb;--mut:#9aa1ab;--ln:#2c3138;--a:#60a5fa;--b:#fb923c;--heat:96,165,250}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif;padding:20px 16px}
+h1{font-size:20px;margin:0}
+.sub{color:var(--mut);margin:2px 0 16px}
+.grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:1000px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:10px;padding:14px}
+.rol{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:5px 6px;text-align:right;white-space:nowrap}
+th{font-size:12px;color:var(--mut);font-weight:600;cursor:pointer;user-select:none;border-bottom:1px solid var(--ln)}
+th:nth-child(-n+2),td:nth-child(-n+2){text-align:left}
+tbody tr{cursor:pointer;border-bottom:1px solid var(--ln)}
+tbody tr:hover{outline:1px solid var(--a)}
+tr.sel{outline:2px solid var(--a)}
+tr.baixa td{opacity:.55}
+input,select{font:inherit;padding:6px 8px;border:1px solid var(--ln);border-radius:6px;background:var(--card);color:var(--tx)}
+.barra{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.mut{color:var(--mut);font-size:12px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+.stat{border:1px solid var(--ln);border-radius:8px;padding:6px 8px}
+.stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--mut)}
+.tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:12px;margin:2px 3px 2px 0;border:1px solid var(--ln)}
+.forte{background:rgba(22,163,74,.15)}.fraco{background:rgba(220,38,38,.15)}.solido{background:rgba(var(--heat),.18)}
+svg text{fill:var(--mut);font-size:11px}
+.dica{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--ln);border-radius:6px;padding:3px 7px;font-size:12px}
+h2{font-size:17px;margin:0}
+h3{font-size:13px;margin:14px 0 4px;color:var(--mut);font-weight:600}
+</style>
+</head>
+<body>
+<h1>CSRats — Painel de jogadores</h1>
+<div class="sub" id="sub"></div>
+<div class="grid">
+  <div class="card">
+    <div class="barra">
+      <input id="busca" placeholder="Buscar jogador…">
+      <label class="mut"><input type="checkbox" id="soRef"> só com confiabilidade média/alta</label>
+    </div>
+    <div class="rol"><table><thead id="cab"></thead><tbody id="corpo"></tbody></table></div>
+    <p class="mut">Percentis (0–100) contra os jogadores de referência. Linhas apagadas: menos de 20 partidas. Clique numa coluna para ordenar e numa linha para ver a ficha.</p>
+  </div>
+  <div class="card" id="ficha"></div>
+</div>
+<div class="dica" id="dica" hidden></div>
+<script>
+const D = /*DADOS*/null;
+const DIMS = D.dimensoes, INDICATIVAS = new Set(["Momento", "Evolução", "Fases"]);
+const $ = id => document.getElementById(id);
+const f1 = v => v == null ? "—" : v.toFixed(1).replace(".", ",");
+const f0 = v => v == null ? "—" : Math.round(v);
+let ordem = {col: "Nível", desc: true}, selA = null, selB = null;
+
+$("sub").textContent = `${D.jogadores.length} jogadores · ${D.total_partidas} partidas · ADR médio da liga ${f1(D.media_liga)} · percentis contra ${D.n_referencia} jogadores com ≥ 20 partidas · gerado em ${D.gerado_em}`;
+
+const colunas = [["nick", "Jogador"], ["n", "N"], ["media", "Média"], ...DIMS.map(d => [d, d.slice(0, 6) + (INDICATIVAS.has(d) ? "*" : "")]), ["perfil", "Perfil"]];
+const valor = (j, c) => c in j.pct ? j.pct[c] : j[c];
+
+function desenharTabela() {
+  $("cab").innerHTML = "<tr>" + colunas.map(([c, t]) => `<th data-c="${c}">${t}${ordem.col === c ? (ordem.desc ? " ▾" : " ▴") : ""}</th>`).join("") + "</tr>";
+  const q = $("busca").value.toLowerCase();
+  const lista = D.jogadores
+    .filter(j => (j.nick + " " + j.nome).toLowerCase().includes(q) && (!$("soRef").checked || j.conf !== "baixa"))
+    .sort((a, b) => {
+      const x = valor(a, ordem.col), y = valor(b, ordem.col);
+      if (x == null) return 1; if (y == null) return -1;
+      return (typeof x === "string" ? x.localeCompare(y) : x - y) * (ordem.desc ? -1 : 1);
+    });
+  $("corpo").innerHTML = lista.map(j => `<tr data-nick="${j.nick}" class="${j.conf === "baixa" ? "baixa" : ""} ${j === selA ? "sel" : ""}">
+    <td>${j.nick}</td><td>${j.n}</td><td>${f1(j.media)}</td>
+    ${DIMS.map(d => { const v = j.pct[d]; return `<td style="background:rgba(var(--heat),${v == null ? 0 : (v / 100 * .55).toFixed(2)})">${f0(v)}</td>`; }).join("")}
+    <td style="text-align:left">${j.perfil.join(", ")}</td></tr>`).join("");
+}
+$("cab").onclick = e => { const c = e.target.closest("th")?.dataset.c; if (!c) return; ordem = {col: c, desc: ordem.col === c ? !ordem.desc : true}; desenharTabela(); };
+$("corpo").onclick = e => { const tr = e.target.closest("tr"); if (tr) { selA = D.jogadores.find(j => j.nick === tr.dataset.nick); desenharTabela(); desenharFicha(); } };
+$("busca").oninput = $("soRef").onchange = desenharTabela;
+
+function radar(a, b) {
+  const R = 105, cx = 160, cy = 140, ang = i => -Math.PI / 2 + i * 2 * Math.PI / DIMS.length;
+  const pt = (i, v) => [cx + Math.cos(ang(i)) * R * v / 100, cy + Math.sin(ang(i)) * R * v / 100];
+  let s = `<svg viewBox="-40 0 400 280" width="100%" style="max-width:440px">`;
+  for (const r of [25, 50, 75, 100]) s += `<polygon points="${DIMS.map((_, i) => pt(i, r).join(",")).join(" ")}" fill="none" stroke="var(--ln)"/>`;
+  DIMS.forEach((d, i) => {
+    const [x, y] = pt(i, 100), [lx, ly] = pt(i, 122);
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--ln)"/>`;
+    s += `<text x="${lx}" y="${ly + 4}" text-anchor="middle">${d}${INDICATIVAS.has(d) ? "*" : ""} ${f0(a.pct[d])}${b ? " / " + f0(b.pct[d]) : ""}</text>`;
+  });
+  for (const [j, cor, tr] of [[b, "var(--b)", "4 3"], [a, "var(--a)", ""]]) {
+    if (!j) continue;
+    s += `<polygon points="${DIMS.map((d, i) => pt(i, j.pct[d] ?? 0).join(",")).join(" ")}" fill="${cor}" fill-opacity=".15" stroke="${cor}" stroke-width="2" stroke-dasharray="${tr}"/>`;
+  }
+  return s + "</svg>";
+}
+
+function mediaMovel(x, k) { return x.map((_, i) => i < k - 1 ? null : x.slice(i - k + 1, i + 1).reduce((s, v) => s + v, 0) / k); }
+
+function serie(a, b) {
+  const W = 520, H = 220, m = {l: 34, r: 8, t: 8, b: 22};
+  const todos = [...a.partidas, ...(b ? b.partidas : [])];
+  const n = Math.max(a.n, b ? b.n : 0), ymin = Math.floor(Math.min(...todos) / 20) * 20, ymax = Math.ceil(Math.max(...todos) / 20) * 20;
+  const X = i => m.l + (n === 1 ? 0 : i / (n - 1)) * (W - m.l - m.r), Y = v => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
+  const linha = (pts, cor, larg, op, tr = "") => `<polyline fill="none" stroke="${cor}" stroke-width="${larg}" stroke-opacity="${op}" stroke-dasharray="${tr}" points="${pts.map((v, i) => v == null ? "" : X(i) + "," + Y(v)).join(" ")}"/>`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" id="graf">`;
+  for (let v = ymin; v <= ymax; v += 20) s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--ln)"/><text x="${m.l - 4}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`;
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(D.media_liga)}" y2="${Y(D.media_liga)}" stroke="var(--mut)" stroke-dasharray="3 3"/>`;
+  s += `<text x="${W - m.r}" y="${H - 6}" text-anchor="end">partida →</text>`;
+  for (const [j, cor] of [[b, "var(--b)"], [a, "var(--a)"]]) {
+    if (!j) continue;
+    s += linha(j.partidas, cor, 1, .35) + linha(mediaMovel(j.partidas, Math.min(10, j.n)), cor, 2.5, 1);
+    s += j.partidas.map((v, i) => `<circle cx="${X(i)}" cy="${Y(v)}" r="2" fill="${cor}" fill-opacity=".5"/>`).join("");
+  }
+  s += `<rect x="${m.l}" y="0" width="${W - m.l - m.r}" height="${H}" fill="transparent" data-n="${n}" data-l="${m.l}" data-w="${W - m.l - m.r}"/>`;
+  return s + "</svg>";
+}
+
+function desenharFicha() {
+  const a = selA;
+  if (!a) { $("ficha").innerHTML = `<p class="mut">Selecione um jogador na tabela.</p>`; return; }
+  const b = selB && selB !== a ? selB : null;
+  const tags = (l, c) => l.map(t => `<span class="tag ${c}">${t}</span>`).join("") || `<span class="mut">—</span>`;
+  $("ficha").innerHTML = `
+    <h2>${a.nick} <span class="mut">${a.nome} · ${a.n} partidas · confiabilidade ${a.conf}</span></h2>
+    <div class="stats">
+      ${[["Média", a.media], ["Média encolhida", a.media_encolhida], ["Desvio padrão", a.dp], ["Coef. variação", a.cv],
+         ["Piso (P10)", a.p10], ["Teto (P90)", a.p90], ["Forma (últ. 10)", a.forma_10], ["Tendência /10 part.", a.tendencia_10]]
+        .map(([t, v]) => `<div class="stat"><b>${t === "Coef. variação" ? (v == null ? "—" : v.toFixed(2).replace(".", ",")) : f1(v)}</b><span>${t}</span></div>`).join("")}
+    </div>
+    <h3>Pontos fortes · fracos</h3>${tags(a.fortes, "forte")} ${tags(a.fracos, "fraco")}
+    <h3>Perfil</h3>${tags(a.perfil, "")}
+    <h3>Efeitos confirmados (q &lt; 0,05)</h3>${tags(a.solidos, "solido")}
+    <div class="barra" style="margin-top:14px"><span class="mut">Comparar com</span>
+      <select id="comp"><option value="">—</option>${D.jogadores.filter(j => j !== a).map(j => `<option ${j === b ? "selected" : ""}>${j.nick}</option>`).join("")}</select>
+      <span class="mut"><b style="color:var(--a)">■</b> ${a.nick}${b ? ` &nbsp;<b style="color:var(--b)">■</b> ${b.nick}` : ""}</span></div>
+    <h3>Características (percentil)</h3>${radar(a, b)}
+    <h3>ADR por partida (linha grossa: média das últimas 10; tracejada: média da liga)</h3>${serie(a, b)}
+    <p class="mut">* Momento, Evolução e Fases são indicativos: só tome como característica real o que aparecer em "efeitos confirmados".</p>`;
+  $("comp").onchange = e => { selB = D.jogadores.find(j => j.nick === e.target.value) || null; desenharFicha(); };
+  const graf = $("graf"), area = graf.querySelector("rect[data-n]");
+  graf.onmousemove = e => {
+    const r = graf.getBoundingClientRect(), esc = r.width / graf.viewBox.baseVal.width;
+    const n = +area.dataset.n, i = Math.round(((e.clientX - r.left) / esc - area.dataset.l) / area.dataset.w * (n - 1));
+    if (i < 0 || i >= n) return ($("dica").hidden = true);
+    const txt = [a, b].filter(j => j && i < j.n).map(j => `${j.nick}: ${f1(j.partidas[i])}`).join(" · ");
+    Object.assign($("dica"), {hidden: false, textContent: `Partida ${i + 1} — ${txt}`});
+    Object.assign($("dica").style, {left: e.clientX + 12 + "px", top: e.clientY + 12 + "px"});
+  };
+  graf.onmouseleave = () => ($("dica").hidden = true);
+}
+
+selA = D.jogadores.reduce((x, y) => (y.media_encolhida > x.media_encolhida ? y : x));
+desenharTabela(); desenharFicha();
+</script>
+</body>
+</html>
